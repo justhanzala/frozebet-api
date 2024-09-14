@@ -1,163 +1,160 @@
-const express = require('express');
-const mysql = require('mysql2/promise');
-require('dotenv').config();
+require("dotenv").config();
+const express = require("express");
+const mysql = require("mysql2/promise");
+const axios = require("axios");
 
 const app = express();
-const port = process.env.PORT || 3000;
-
 app.use(express.json());
 
 // Database connection
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+  password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
 });
 
-// Test database connection
-pool.getConnection()
-  .then(connection => {
-    console.log('Connected to MySQL database');
-    connection.release();
-  })
-  .catch(err => {
-    console.error('Error connecting to MySQL database:', err);
-    process.exit(1); // Exit the process if we can't connect to the database
-  });
-
-// Input validation middleware
-const validateInput = (req, res, next) => {
-  const { action, player_id, currency, session_id } = req.body;
-  if (!action || !player_id || !currency || !session_id) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-  if (!["balance", "bet", "win", "refund"].includes(action)) {
-    return res.status(400).json({ error: "Invalid action" });
-  }
-  if (action !== "balance") {
-    const { amount, game_uuid, transaction_id, type } = req.body;
-    if (!amount || !game_uuid || !transaction_id || !type) {
-      return res
-        .status(400)
-        .json({ error: "Missing required fields for non-balance action" });
-    }
-    if (typeof amount !== "number" || amount < 0) {
-      return res.status(400).json({ error: "Invalid amount" });
-    }
-  }
-  next();
-};
-
-// POST route for all actions
-app.post("/bet", validateInput, async (req, res) => {
-  const {
-    action,
-    player_id,
-    currency,
-    session_id,
-    amount,
-    game_uuid,
-    transaction_id,
-    type,
-    freespin_id,
-    quantity,
-    round_id,
-    finished,
-    bet_transaction_id,
-  } = req.body;
+// Helper function to save transaction
+async function saveTransaction(data) {
+  const query = `
+    INSERT INTO transactions 
+    (action, player_id, amount, currency, game_uuid, transaction_id, session_id, type, freespin_id, quantity, round_id, finished) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+  const values = [
+    data.action,
+    data.player_id,
+    data.amount,
+    data.currency,
+    data.game_uuid,
+    data.transaction_id,
+    data.session_id,
+    data.type,
+    data.freespin_id,
+    data.quantity,
+    data.round_id,
+    data.finished,
+  ];
 
   try {
-    let result;
-    let balance;
+    const [result] = await pool.execute(query, values);
+    return result.insertId;
+  } catch (error) {
+    console.error("Error saving transaction:", error);
+    throw error;
+  }
+}
 
+// Helper function to forward request to client
+async function forwardToClient(data) {
+  try {
+    const response = await axios.post(
+      process.env.CLIENT_CALLBACK_ENDPOINT,
+      data,
+      { timeout: 10000 }
+    ); // 10 second timeout
+    if (!response.data) {
+      throw new Error("Empty response from client");
+    }
+    return response.data;
+  } catch (error) {
+    console.error("Error forwarding request to client:", error);
+    if (error.code === "ECONNABORTED" || error.message.includes("timeout")) {
+      throw new Error("Client not responding");
+    }
+    throw new Error("Error communicating with client");
+  }
+}
+
+// Main API endpoint
+app.post("/api/game-provider", async (req, res) => {
+  const { action } = req.body;
+
+  try {
+    // Save the incoming request to the database
+    await saveTransaction(req.body);
+
+    let clientResponse;
     switch (action) {
       case "balance":
-        [result] = await pool.execute(
-          "SELECT balance FROM bets WHERE player_id = ? ORDER BY created_at DESC LIMIT 1",
-          [player_id]
-        );
-        balance = result[0] ? result[0].balance : 0;
-        return res.json({ balance });
-
+        clientResponse = await handleBalance(req.body);
+        break;
       case "bet":
+        clientResponse = await handleBet(req.body);
+        break;
       case "win":
+        clientResponse = await handleWin(req.body);
+        break;
       case "refund":
-        // Check if transaction already exists
-        [result] = await pool.execute(
-          "SELECT * FROM bets WHERE transaction_id = ? AND action = ?",
-          [transaction_id, action]
-        );
-        if (result.length > 0) {
-          return res.json({
-            balance: result[0].balance,
-            transaction_id: result[0].transaction_id,
-          });
-        }
-
-        // Get current balance
-        [result] = await pool.execute(
-          "SELECT balance FROM bets WHERE player_id = ? ORDER BY created_at DESC LIMIT 1",
-          [player_id]
-        );
-        balance = result[0] ? result[0].balance : 0;
-
-        // Update balance based on action
-        if (action === "bet") balance -= amount;
-        if (action === "win" || action === "refund") balance += amount;
-
-        // Insert new transaction
-        [result] = await pool.execute(
-          "INSERT INTO bets (action, amount, currency, game_uuid, player_id, transaction_id, session_id, type, freespin_id, quantity, round_id, finished, bet_transaction_id, balance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [
-            action,
-            amount,
-            currency,
-            game_uuid,
-            player_id,
-            transaction_id,
-            session_id,
-            type,
-            freespin_id,
-            quantity,
-            round_id,
-            finished,
-            bet_transaction_id,
-            balance,
-          ]
-        );
-
-        return res.json({ balance, transaction_id });
-
+        clientResponse = await handleRefund(req.body);
+        break;
       default:
         return res.status(400).json({ error: "Invalid action" });
     }
+
+    res.json(clientResponse);
   } catch (error) {
-    console.error("Error processing bet:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Error processing request:", error);
+    if (error.message === "Client not responding") {
+      res
+        .status(504)
+        .json({ error: "Client not responding, please try again later" });
+    } else {
+      res
+        .status(500)
+        .json({ error: "Internal server error, please try again later" });
+    }
   }
 });
 
-// GET route for fetching all bets
-app.get("/bets", async (req, res) => {
+async function handleBalance(data) {
+  const clientResponse = await forwardToClient(data);
+  return {
+    balance: clientResponse.balance,
+  };
+}
+
+async function handleBet(data) {
+  const clientResponse = await forwardToClient(data);
+  return {
+    balance: clientResponse.balance,
+    transaction_id: clientResponse.transaction_id,
+  };
+}
+
+async function handleWin(data) {
+  const clientResponse = await forwardToClient(data);
+  return {
+    balance: clientResponse.balance,
+    transaction_id: clientResponse.transaction_id,
+  };
+}
+
+async function handleRefund(data) {
+  const clientResponse = await forwardToClient(data);
+  return {
+    balance: clientResponse.balance,
+    transaction_id: clientResponse.transaction_id,
+  };
+}
+
+// GET route for fetching all transactions
+app.get("/transactions", async (req, res) => {
   try {
-    const [rows] = await pool.execute("SELECT * FROM bets ORDER BY created_at DESC LIMIT 100");
+    const [rows] = await pool.execute(
+      "SELECT * FROM transactions ORDER BY created_at DESC LIMIT 100"
+    );
     res.json({ success: true, data: rows });
   } catch (error) {
-    console.error("Error fetching bets:", error);
+    console.error("Error fetching transactions:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: "Something went wrong!" });
-});
-
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
