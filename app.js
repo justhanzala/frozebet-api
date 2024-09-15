@@ -2,9 +2,14 @@ require("dotenv").config();
 const express = require("express");
 const mysql = require("mysql2/promise");
 const axios = require("axios");
+const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
+
+const CLIENT_URL = "https://demo.frozebet.com/casino_wallet";
+const AUTH_TOKEN =
+  "9829c6293f9a737d0c9b7dec9ac5a67e1027ce9b46bb54c0e3efe8afd4e3c6b3668befad";
 
 // Database connection
 const pool = mysql.createPool({
@@ -50,12 +55,21 @@ async function saveTransaction(data) {
 
 // Helper function to forward request to client
 async function forwardToClient(data) {
+  const body = new URLSearchParams(data).toString();
+  const signature = crypto
+    .createHmac("sha256", AUTH_TOKEN)
+    .update(body)
+    .digest("hex");
+
   try {
-    const response = await axios.post(
-      process.env.CLIENT_CALLBACK_ENDPOINT,
-      data,
-      { timeout: 10000 }
-    ); // 10 second timeout
+    const response = await axios.post(CLIENT_URL, body, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-REQUEST-SIGN": signature,
+      },
+      timeout: 10000, // 10 second timeout
+    });
+
     if (!response.data) {
       throw new Error("Empty response from client");
     }
@@ -112,33 +126,22 @@ app.post("/api/game-provider", async (req, res) => {
 
 async function handleBalance(data) {
   const clientResponse = await forwardToClient(data);
-  return {
-    balance: clientResponse.balance,
-  };
+  return clientResponse;
 }
 
 async function handleBet(data) {
   const clientResponse = await forwardToClient(data);
-  return {
-    balance: clientResponse.balance,
-    transaction_id: clientResponse.transaction_id,
-  };
+  return clientResponse;
 }
 
 async function handleWin(data) {
   const clientResponse = await forwardToClient(data);
-  return {
-    balance: clientResponse.balance,
-    transaction_id: clientResponse.transaction_id,
-  };
+  return clientResponse;
 }
 
 async function handleRefund(data) {
   const clientResponse = await forwardToClient(data);
-  return {
-    balance: clientResponse.balance,
-    transaction_id: clientResponse.transaction_id,
-  };
+  return clientResponse;
 }
 
 // GET route for fetching all transactions
