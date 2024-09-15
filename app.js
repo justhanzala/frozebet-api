@@ -22,6 +22,18 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
+// Test database connection
+pool
+  .getConnection()
+  .then((connection) => {
+    console.log("Connected to MySQL database");
+    connection.release();
+  })
+  .catch((err) => {
+    console.error("Error connecting to MySQL database:", err);
+    process.exit(1); // Exit the process if we can't connect to the database
+  });
+
 // Helper function to save transaction
 async function saveTransaction(data) {
   const query = `
