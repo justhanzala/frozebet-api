@@ -42,18 +42,18 @@ async function saveTransaction(data) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
   const values = [
-    data.action,
-    data.player_id,
-    data.amount,
-    data.currency,
-    data.game_uuid,
-    data.transaction_id,
-    data.session_id,
-    data.type,
-    data.freespin_id,
-    data.quantity,
-    data.round_id,
-    data.finished,
+    data.action || null,
+    data.player_id || null,
+    data.amount || null,
+    data.currency || null,
+    data.game_uuid || null,
+    data.transaction_id || null,
+    data.session_id || null,
+    data.type || null,
+    data.freespin_id || null,
+    data.quantity || null,
+    data.round_id || null,
+    data.finished !== undefined ? data.finished : null,
   ];
 
   try {
@@ -98,6 +98,7 @@ async function forwardToClient(data) {
 // Main API endpoint
 app.post("/api/game-provider", async (req, res) => {
   const { action } = req.body;
+  console.log("Received request:", req.body);
 
   try {
     // Save the incoming request to the database
@@ -121,6 +122,7 @@ app.post("/api/game-provider", async (req, res) => {
         return res.status(400).json({ error: "Invalid action" });
     }
 
+    console.log("Client response:", clientResponse);
     res.json(clientResponse);
   } catch (error) {
     console.error("Error processing request:", error);
