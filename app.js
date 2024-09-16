@@ -121,28 +121,30 @@ async function forwardToClient(data) {
   }
 }
 
-// Main API endpoint
-app.post("/api/game-provider", async (req, res) => {
-  const { action } = req.body;
-  console.log("Received request:", req.body);
+app.post("/api/game-provider", express.urlencoded({ extended: true }), async (req, res) => {
+  // Combine query parameters and body to handle both cases
+  const data = { ...req.query, ...req.body };
+  const { action } = data;
+  
+  console.log("Received request:", data);
 
   try {
     // Save the incoming request to the database
-    await saveTransaction(req.body);
+    await saveTransaction(data);
 
     let clientResponse;
     switch (action) {
       case "balance":
-        clientResponse = await handleBalance(req.body);
+        clientResponse = await handleBalance(data);
         break;
       case "bet":
-        clientResponse = await handleBet(req.body);
+        clientResponse = await handleBet(data);
         break;
       case "win":
-        clientResponse = await handleWin(req.body);
+        clientResponse = await handleWin(data);
         break;
       case "refund":
-        clientResponse = await handleRefund(req.body);
+        clientResponse = await handleRefund(data);
         break;
       default:
         return res.status(400).json({ error: "Invalid action" });
