@@ -87,7 +87,7 @@ async function forwardToClient(data) {
   const casinoSession = await getCasinoSession(data.player_id);
   
   // Here, we're not changing the player_id, as it's already the correct value
-  const modifiedData = { ...data };
+  const modifiedData = { ...data, player_id: casinoSession.user_id };
   
   console.log("Modified data to be sent to client:", modifiedData);
 
