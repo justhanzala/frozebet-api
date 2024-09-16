@@ -7,10 +7,6 @@ const crypto = require("crypto");
 const app = express();
 app.use(express.json());
 
-const CLIENT_URL = "https://demo.frozebet.com/casino_wallet";
-const AUTH_TOKEN =
-  "9829c6293f9a737d0c9b7dec9ac5a67e1027ce9b46bb54c0e3efe8afd4e3c6b3668befad";
-
 // Database connection
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -33,6 +29,25 @@ pool
     console.error("Error connecting to MySQL database:", err);
     process.exit(1); // Exit the process if we can't connect to the database
   });
+
+// Helper function to get casino session data
+async function getCasinoSession(userToSend) {
+  const query = `
+    SELECT auth_token, client_url, user_id
+    FROM casino_sessions
+    WHERE user_to_send = ?
+  `;
+  try {
+    const [rows] = await pool.execute(query, [userToSend]);
+    if (rows.length === 0) {
+      throw new Error("Casino session not found");
+    }
+    return rows[0];
+  } catch (error) {
+    console.error("Error fetching casino session:", error);
+    throw error;
+  }
+}
 
 // Helper function to save transaction
 async function saveTransaction(data) {
@@ -67,16 +82,19 @@ async function saveTransaction(data) {
 
 // Helper function to forward request to client
 async function forwardToClient(data) {
-  const body = JSON.stringify(data);
+  const casinoSession = await getCasinoSession(data.player_id);
+  const modifiedData = { ...data, player_id: casinoSession.user_id };
+
+  const body = JSON.stringify(modifiedData);
   const signature = crypto
-    .createHmac("sha256", AUTH_TOKEN)
+    .createHmac("sha256", casinoSession.auth_token)
     .update(body)
     .digest("hex");
 
   try {
-    const response = await axios.post(CLIENT_URL, body, {
+    const response = await axios.post(casinoSession.client_url, body, {
       headers: {
-        "Content-Type": "application/json", // Set to application/json
+        "Content-Type": "application/json",
         "X-REQUEST-SIGN": signature,
       },
       timeout: 10000, // 10 second timeout
@@ -130,6 +148,8 @@ app.post("/api/game-provider", async (req, res) => {
       res
         .status(504)
         .json({ error: "Client not responding, please try again later" });
+    } else if (error.message === "Casino session not found") {
+      res.status(404).json({ error: "Casino session not found" });
     } else {
       res
         .status(500)
