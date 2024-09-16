@@ -40,8 +40,10 @@ async function getCasinoSession(userToSend) {
   try {
     const [rows] = await pool.execute(query, [userToSend]);
     if (rows.length === 0) {
+      console.error(`Casino session not found for user_to_send: ${userToSend}`);
       throw new Error("Casino session not found");
     }
+    console.log(`Casino session found:`, rows[0]);
     return rows[0];
   } catch (error) {
     console.error("Error fetching casino session:", error);
@@ -90,8 +92,14 @@ async function saveTransaction(data) {
 
 // Helper function to forward request to client
 async function forwardToClient(data) {
+  console.log("Incoming data:", data);
+
   const casinoSession = await getCasinoSession(data.player_id);
-  const modifiedData = { ...data, player_id: casinoSession.user_id };
+
+  // Here, we're not changing the player_id, as it's already the correct value
+  const modifiedData = { ...data };
+
+  console.log("Modified data to be sent to client:", modifiedData);
 
   const body = JSON.stringify(modifiedData);
   const signature = crypto
@@ -100,6 +108,7 @@ async function forwardToClient(data) {
     .digest("hex");
 
   try {
+    console.log(`Sending request to ${casinoSession.client_url}`);
     const response = await axios.post(casinoSession.client_url, body, {
       headers: {
         "Content-Type": "application/json",
@@ -111,6 +120,7 @@ async function forwardToClient(data) {
     if (!response.data) {
       throw new Error("Empty response from client");
     }
+    console.log("Response from client:", response.data);
     return response.data;
   } catch (error) {
     console.error("Error forwarding request to client:", error);
