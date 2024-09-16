@@ -67,7 +67,7 @@ async function saveTransaction(data) {
 
 // Helper function to forward request to client
 async function forwardToClient(data) {
-  const body = new URLSearchParams(data).toString();
+  const body = JSON.stringify(data);
   const signature = crypto
     .createHmac("sha256", AUTH_TOKEN)
     .update(body)
@@ -76,7 +76,7 @@ async function forwardToClient(data) {
   try {
     const response = await axios.post(CLIENT_URL, body, {
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json", // Set to application/json
         "X-REQUEST-SIGN": signature,
       },
       timeout: 10000, // 10 second timeout
