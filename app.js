@@ -51,20 +51,13 @@ async function getCasinoSession(userToSend) {
 
 // Helper function to save transaction
 async function saveTransaction(data) {
-  console.log("Saving transaction data:", data); // Log the incoming data
-
-  if (!data.action) {
-    console.error("Error: action is null or undefined in the incoming request");
-    throw new Error("Action is required");
-  }
-
   const query = `
     INSERT INTO transactions 
     (action, player_id, amount, currency, game_uuid, transaction_id, session_id, type, freespin_id, quantity, round_id, finished) 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
   const values = [
-    data.action,
+    data.action || null,
     data.player_id || null,
     data.amount || null,
     data.currency || null,
@@ -80,7 +73,6 @@ async function saveTransaction(data) {
 
   try {
     const [result] = await pool.execute(query, values);
-    console.log("Transaction saved successfully, ID:", result.insertId);
     return result.insertId;
   } catch (error) {
     console.error("Error saving transaction:", error);
@@ -135,10 +127,6 @@ app.post("/api/game-provider", async (req, res) => {
   console.log("Received request:", req.body);
 
   try {
-    if (!action) {
-      throw new Error("Action is required");
-    }
-
     // Save the incoming request to the database
     await saveTransaction(req.body);
 
@@ -170,8 +158,6 @@ app.post("/api/game-provider", async (req, res) => {
         .json({ error: "Client not responding, please try again later" });
     } else if (error.message === "Casino session not found") {
       res.status(404).json({ error: "Casino session not found" });
-    } else if (error.message === "Action is required") {
-      res.status(400).json({ error: "Action is required in the request" });
     } else {
       res
         .status(500)
